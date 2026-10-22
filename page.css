@@ -1,0 +1,31 @@
+/* Pin buttons injected next to repo links on github.com */
+.gitpin-btn {
+  all: unset;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  margin-left: 4px;
+  vertical-align: middle;
+  border-radius: 4px;
+  cursor: pointer;
+  color: #8b949e;
+  opacity: 0.45;
+  transition: opacity 0.12s, color 0.12s, background 0.12s;
+  flex: none;
+}
+.gitpin-btn:hover,
+.gitpin-btn:focus-visible {
+  opacity: 1;
+  background: rgba(127, 127, 127, 0.18);
+}
+.gitpin-btn[aria-pressed='true'] {
+  color: #d29922;
+  opacity: 1;
+}
+.gitpin-btn svg {
+  width: 13px;
+  height: 13px;
+  fill: currentColor;
+}
