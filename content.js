@@ -30,8 +30,20 @@
     return parts.join('/');
   }
 
+  // GitHub org/user a pinned URL belongs to (any github.com page under them), else null.
+  function ownerOf(href) {
+    try {
+      const u = new URL(href);
+      const owner = u.hostname === 'github.com' && u.pathname.split('/').filter(Boolean)[0];
+      return owner && !RESERVED.has(owner.toLowerCase()) ? owner : null;
+    } catch {
+      return null;
+    }
+  }
+
   let pins = [];
   let pinned = new Set();
+  let collapsed = new Set();
   let isOpen = false;
   let lastContextLink = null;
 
@@ -52,7 +64,7 @@
         <input class="search" type="search" placeholder="Filter…  ↵ opens first match" spellcheck="false">
         <button class="pin-page"></button>
       </div>
-      <ul class="list"></ul>
+      <div class="list"></div>
       <p class="empty"></p>
     </aside>`;
   document.documentElement.appendChild(host);
@@ -75,8 +87,6 @@
   }
 
   function iconFor(url) {
-    const repo = repoFromUrl(url);
-    if (repo) return `https://github.com/${repo.split('/')[0]}.png?size=40`;
     return chrome.runtime.getURL(`/_favicon/?pageUrl=${encodeURIComponent(url)}&size=32`);
   }
 
@@ -95,35 +105,94 @@
     return pins.filter((p) => (p.title + ' ' + p.url).toLowerCase().includes(q));
   }
 
+  // Pins grouped by GitHub org/user, in order of first appearance; other links last.
+  function grouped(list) {
+    const groups = new Map();
+    for (const p of list) {
+      const owner = ownerOf(p.url) || '';
+      if (!groups.has(owner)) groups.set(owner, []);
+      groups.get(owner).push(p);
+    }
+    const links = groups.get('');
+    groups.delete('');
+    if (links) groups.set('', links);
+    return groups;
+  }
+
+  function pinRow(p, owner, draggable) {
+    const li = document.createElement('li');
+    li.dataset.url = p.url;
+    li.draggable = draggable;
+    const a = document.createElement('a');
+    a.href = p.url;
+    a.title = p.url;
+    const text = document.createElement('span');
+    text.className = 'text';
+    const name = document.createElement('span');
+    name.className = 'name';
+    // Inside an org group the "owner/" prefix is redundant.
+    name.textContent = owner && p.title.startsWith(owner + '/') ? p.title.slice(owner.length + 1) : p.title;
+    const sub = document.createElement('span');
+    sub.className = 'sub';
+    sub.textContent = subtitle(p.url);
+    text.append(name, sub);
+    // Org groups show the avatar in the header, so only loose links get an icon.
+    if (!owner) {
+      const img = document.createElement('img');
+      img.alt = '';
+      img.referrerPolicy = 'no-referrer';
+      img.src = iconFor(p.url);
+      a.append(img);
+    }
+    a.append(text);
+    const remove = document.createElement('button');
+    remove.className = 'remove';
+    remove.title = 'Unpin';
+    remove.textContent = '✕';
+    remove.onclick = () => Store.removePin(p.url);
+    li.append(a, remove);
+    return li;
+  }
+
   function render() {
     const shown = filtered();
     const filtering = shown !== pins;
-    list.replaceChildren(
-      ...shown.map((p) => {
-        const li = document.createElement('li');
-        li.dataset.url = p.url;
-        li.draggable = !filtering;
-        li.innerHTML = `
-          <a href="" title="">
-            <img alt="" referrerpolicy="no-referrer">
-            <span class="text"><span class="name"></span><span class="sub"></span></span>
-          </a>
-          <button class="remove" title="Unpin">✕</button>`;
-        const a = li.querySelector('a');
-        a.href = p.url;
-        a.title = p.url;
-        li.querySelector('.name').textContent = p.title;
-        li.querySelector('.sub').textContent = subtitle(p.url);
-        const img = li.querySelector('img');
-        img.src = iconFor(p.url);
-        img.onerror = () => {
-          img.onerror = null;
-          img.src = chrome.runtime.getURL(`/_favicon/?pageUrl=${encodeURIComponent(p.url)}&size=32`);
-        };
-        li.querySelector('.remove').onclick = () => Store.removePin(p.url);
-        return li;
-      })
-    );
+    const sections = [];
+    for (const [owner, items] of grouped(shown)) {
+      const section = document.createElement('section');
+      section.className = 'group';
+      section.dataset.owner = owner;
+      const closed = !filtering && collapsed.has(owner);
+      section.classList.toggle('collapsed', closed);
+
+      const head = document.createElement('button');
+      head.className = 'group-h';
+      head.setAttribute('aria-expanded', !closed);
+      head.innerHTML = '<svg class="caret" viewBox="0 0 12 12"><path d="M2.5 4.5 6 8l3.5-3.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+      if (owner) {
+        const avatar = document.createElement('img');
+        avatar.alt = '';
+        avatar.referrerPolicy = 'no-referrer';
+        avatar.src = `https://github.com/${owner}.png?size=40`;
+        avatar.onerror = () => avatar.remove();
+        head.append(avatar);
+      }
+      const label = document.createElement('span');
+      label.className = 'group-name';
+      label.textContent = owner || 'Links';
+      const count = document.createElement('span');
+      count.className = 'group-count';
+      count.textContent = items.length;
+      head.append(label, count);
+      head.onclick = () => toggleGroup(owner);
+
+      const ul = document.createElement('ul');
+      ul.append(...items.map((p) => pinRow(p, owner, !filtering)));
+      section.append(head, ul);
+      sections.push(section);
+    }
+    list.replaceChildren(...sections);
+
     $('.count').textContent = pins.length ? `(${pins.length})` : '';
     const empty = $('.empty');
     empty.hidden = shown.length > 0;
@@ -135,6 +204,13 @@
     const here = pinned.has(Store.normalize(location.href));
     pinPageBtn.textContent = here ? 'Unpin this page' : 'Pin this page';
     pinPageBtn.classList.toggle('active', here);
+  }
+
+  function toggleGroup(owner) {
+    if (collapsed.has(owner)) collapsed.delete(owner);
+    else collapsed.add(owner);
+    chrome.storage.local.set({ collapsed: [...collapsed] });
+    render();
   }
 
   function pageTitle() {
@@ -173,7 +249,7 @@
     if (!dragging) return;
     e.preventDefault();
     const over = e.target.closest('li');
-    if (!over || over === dragging) return;
+    if (!over || over === dragging || over.parentNode !== dragging.parentNode) return;
     const { top, height } = over.getBoundingClientRect();
     over[e.clientY < top + height / 2 ? 'before' : 'after'](dragging);
   });
@@ -181,7 +257,7 @@
     if (!dragging) return;
     dragging.classList.remove('dragging');
     dragging = null;
-    const order = [...list.children].map((li) => li.dataset.url);
+    const order = [...list.querySelectorAll('li')].map((li) => li.dataset.url);
     Store.savePins(order.map((url) => pins.find((p) => p.url === url)).filter(Boolean));
   });
 
@@ -247,6 +323,10 @@
   }
 
   Store.onPinsChanged(setPins);
+  chrome.storage.local.get('collapsed').then(({ collapsed: c = [] }) => {
+    collapsed = new Set(c);
+    if (isOpen) render();
+  });
   Store.getPins().then((p) => {
     setPins(p);
     if (IS_GITHUB) decorate();
@@ -335,7 +415,23 @@
       .pin-page:hover { background: var(--hover); }
       .pin-page.active { color: var(--accent); }
 
-      .list { list-style: none; margin: 0; padding: 6px; overflow-y: auto; flex: 1; }
+      .list { margin: 0; padding: 6px; overflow-y: auto; flex: 1; }
+      .group + .group { margin-top: 4px; }
+      .group-h {
+        display: flex; align-items: center; gap: 8px; width: 100%;
+        padding: 6px 8px; border: none; border-radius: 6px; background: none;
+        color: var(--muted); font-size: 11px; font-weight: 600;
+        text-transform: uppercase; letter-spacing: .05em; text-align: left;
+      }
+      .group-h:hover { background: var(--hover); color: var(--fg); }
+      .group-h img { width: 16px; height: 16px; border-radius: 4px; }
+      .caret { width: 12px; height: 12px; fill: none; transition: transform .15s; }
+      .collapsed .caret { transform: rotate(-90deg); }
+      .group-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-transform: none; font-size: 12px; letter-spacing: 0; }
+      .group-count { font-weight: 500; }
+      .group ul { list-style: none; margin: 0; padding: 0; }
+      .collapsed ul { display: none; }
+      .group[data-owner]:not([data-owner=""]) li a { padding-left: 28px; }
       li { display: flex; align-items: center; border-radius: 6px; }
       li:hover { background: var(--hover); }
       li.dragging { opacity: .4; }

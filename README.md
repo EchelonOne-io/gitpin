@@ -14,6 +14,7 @@ Pin GitHub repos (and any other link) to a slide-out drawer on the right side of
 - **Any link, any site:** right-click it and choose **Pin link to GitPin**.
 - **Current page:** use **Pin this page** in the drawer, or right-click the page.
 - **Open the drawer:** click the tab on the right edge (GitHub only), click the toolbar icon, or press `Ctrl+Shift+P` on Mac (`Alt+Shift+P` elsewhere). You can change the shortcut at `chrome://extensions/shortcuts`.
-- In the drawer, type to filter. `Enter` opens the first match (`⌘/Ctrl+Enter` opens it in a new tab). Drag rows to reorder them, and press `Esc` to close.
+- Pins are grouped by GitHub org or user, and other links are grouped under **Links**. Click a group's header to collapse it.
+- In the drawer, type to filter. `Enter` opens the first match (`⌘/Ctrl+Enter` opens it in a new tab). Drag rows to reorder them within a group, and press `Esc` to close.
 
 Pins are saved in `chrome.storage.local`, so they stay on this browser profile.
